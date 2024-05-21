@@ -3,46 +3,35 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"time"
 )
 
 type Address struct {
-	CEP          string `json:"cep"`
-	Logradouro   string `json:"logradouro"`
-	Bairro       string `json:"bairro"`
-	Localidade   string `json:"localidade"`
-	UF           string `json:"uf"`
-	Complemento  string `json:"complemento"`
-	Numero       string `json:"numero"`
-	Erro         bool   `json:"erro"`
-	ErrorMessage string `json:"message"`
+	CEP         string `json:"cep"`
+	State       string `json:"state"`
+	City        string `json:"city"`
+	Neighborhood string `json:"neighborhood"`
+	Street      string `json:"street"`
+	Service     string `json:"service"`
 }
 
-func requestAPI(url string, ch chan Address) {
+func requestAPI(url string, ch chan Address, source string) {
 	client := http.Client{Timeout: 1 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		ch <- Address{Erro: true, ErrorMessage: err.Error()}
+		ch <- Address{CEP: "", Service: source}
 		return
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		ch <- Address{Erro: true, ErrorMessage: err.Error()}
-		return
-	}
-
 	var address Address
-	err = json.Unmarshal(body, &address)
+	err = json.NewDecoder(resp.Body).Decode(&address)
 	if err != nil {
-		ch <- Address{Erro: true, ErrorMessage: err.Error()}
+		ch <- Address{CEP: "", Service: source}
 		return
 	}
 
-	address.Erro = false
 	ch <- address
 }
 
@@ -53,33 +42,23 @@ func main() {
 
 	ch := make(chan Address, 2)
 
-	go requestAPI(api1, ch)
-	go requestAPI(api2, ch)
+	go requestAPI(api1, ch, "BrasilAPI")
+	go requestAPI(api2, ch, "ViaCEP")
 
-	var address Address
 	select {
-	case address = <-ch:
+	case address := <-ch:
+		if address.CEP == "" {
+			fmt.Printf("Erro ao obter dados do endereço da %s\n", address.Service)
+			return
+		}
+
+		fmt.Printf("Dados do endereço obtidos pela API que respondeu mais rápido (%s):\n", address.Service)
+		fmt.Printf("CEP: %s\n", address.CEP)
+		fmt.Printf("Estado: %s\n", address.State)
+		fmt.Printf("Cidade: %s\n", address.City)
+		fmt.Printf("Bairro: %s\n", address.Neighborhood)
+		fmt.Printf("Rua: %s\n", address.Street)
 	case <-time.After(1 * time.Second):
 		fmt.Println("Timeout ao tentar obter os dados do endereço.")
-		return
 	}
-
-	if address.Erro {
-		fmt.Printf("Erro ao obter dados do endereço: %s\n", address.ErrorMessage)
-		return
-	}
-
-	if address.Logradouro != "" {
-		fmt.Println("Dados do endereço obtidos pela primeira API:")
-	} else {
-		fmt.Println("Dados do endereço obtidos pela segunda API:")
-	}
-
-	fmt.Printf("CEP: %s\n", address.CEP)
-	fmt.Printf("Logradouro: %s\n", address.Logradouro)
-	fmt.Printf("Bairro: %s\n", address.Bairro)
-	fmt.Printf("Localidade: %s\n", address.Localidade)
-	fmt.Printf("UF: %s\n", address.UF)
-	fmt.Printf("Complemento: %s\n", address.Complemento)
-	fmt.Printf("Número: %s\n", address.Numero)
 }
